@@ -34,9 +34,9 @@ from cg.api import (
 from heuristic import evaluate_state
 
 DEBUG = os.environ.get("PTCG_DEBUG", "1") == "1"
-ROLLOUT_DEPTH = int(os.environ.get("PTCG_ROLLOUT_DEPTH", "5"))
+ROLLOUT_DEPTH = int(os.environ.get("PTCG_ROLLOUT_DEPTH", "3"))
 ROLLOUT_SAMPLES = int(os.environ.get("PTCG_ROLLOUT_SAMPLES", "1"))
-MAIN_TIME_BUDGET_S = float(os.environ.get("PTCG_MAIN_TIME_BUDGET_S", "2.0"))
+MAIN_TIME_BUDGET_S = float(os.environ.get("PTCG_MAIN_TIME_BUDGET_S", "1.0"))
 
 _ALL_CARDS = None
 
