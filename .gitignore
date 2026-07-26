@@ -1,0 +1,7 @@
+# Large competition data (re-downloadable via kaggle CLI, don't bloat the repo)
+data_raw/Card_ID List_EN.pdf
+data_raw/Card_ID List_JP.pdf
+pokemon-tcg-ai-battle.zip
+__pycache__/
+*.pyc
+.DS_Store
