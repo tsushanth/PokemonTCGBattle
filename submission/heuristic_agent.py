@@ -22,12 +22,13 @@ import sys
 
 from cg.api import (
     Observation, SelectType, SelectContext, OptionType, AreaType,
-    to_observation_class, all_attack,
+    to_observation_class, all_attack, all_card_data,
 )
 
 DEBUG = os.environ.get("PTCG_DEBUG", "1") == "1"
 
 _ATTACK_DAMAGE = None
+_CARD_DATA = None
 
 
 def _log(msg: str) -> None:
@@ -40,6 +41,13 @@ def _attack_damage_lookup() -> dict:
     if _ATTACK_DAMAGE is None:
         _ATTACK_DAMAGE = {a.attackId: a.damage for a in all_attack()}
     return _ATTACK_DAMAGE
+
+
+def _card_data_lookup() -> dict:
+    global _CARD_DATA
+    if _CARD_DATA is None:
+        _CARD_DATA = {c.cardId: c for c in all_card_data()}
+    return _CARD_DATA
 
 
 def read_deck_csv() -> list[int]:
@@ -87,6 +95,26 @@ def _choose_main(obs: Observation) -> list[int]:
     sel = obs.select
     options = sel.option
     n = len(options)
+    state = obs.current
+
+    # A lethal attack (would KO the opponent's active) always wins outright,
+    # even over development -- there's no reason to attach/evolve first if
+    # the game can be pushed forward by a knockout right now.
+    attack_dmg = _attack_damage_lookup()
+    opp_active = None
+    if state is not None:
+        opp = state.players[1 - state.yourIndex]
+        opp_active = opp.active[0] if opp.active else None
+    if opp_active is not None:
+        lethal = [
+            i for i, o in enumerate(options)
+            if o.type == OptionType.ATTACK and attack_dmg.get(o.attackId, 0) >= opp_active.hp
+        ]
+        if lethal:
+            best = max(lethal, key=lambda i: attack_dmg.get(options[i].attackId, 0))
+            _log(f"MAIN: lethal attack available (damage {attack_dmg.get(options[best].attackId, 0)} "
+                 f">= opponent active hp {opp_active.hp}), taking it")
+            return [best]
 
     priority = {
         OptionType.EVOLVE: 0, OptionType.ATTACH: 1, OptionType.PLAY: 2,
@@ -97,10 +125,21 @@ def _choose_main(obs: Observation) -> list[int]:
     tied = [i for i, o in enumerate(options) if priority.get(o.type, 6) == best_priority]
 
     if options[tied[0]].type == OptionType.ATTACK and len(tied) > 1:
-        attack_dmg = _attack_damage_lookup()
         best = max(tied, key=lambda i: attack_dmg.get(options[i].attackId, 0))
         _log(f"MAIN: attacking (highest damage {attack_dmg.get(options[best].attackId, 0)} "
              f"among {len(tied)} attack options), no better development action available")
+        return [best]
+
+    if options[tied[0]].type == OptionType.ATTACH and len(tied) > 1:
+        # Prefer fueling the active Pokemon (it's the one attacking) over a
+        # benched one, when the option's target is resolvable.
+        active_targets = [
+            i for i in tied
+            if options[i].inPlayArea == AreaType.ACTIVE
+        ]
+        best = active_targets[0] if active_targets else tied[0]
+        _log(f"MAIN: attaching to {'active' if active_targets else 'first available'} target "
+             f"({len(tied)} attach options)")
         return [best]
 
     best = tied[0]
@@ -119,6 +158,21 @@ def _choose_card(obs: Observation) -> list[int]:
     state = obs.current
     n = len(options)
     idx = list(range(n))
+
+    # Setup selections pick a Pokemon straight from hand (not yet in play),
+    # so there's no board Pokemon to resolve -- look up base HP from the
+    # card data instead via the option's cardId.
+    if sel.context in (SelectContext.SETUP_ACTIVE_POKEMON, SelectContext.SETUP_BENCH_POKEMON):
+        cards = _card_data_lookup()
+        scored = [
+            (i, cards[o.cardId].hp)
+            for i, o in enumerate(options)
+            if o.cardId is not None and o.cardId in cards
+        ]
+        if scored:
+            scored.sort(key=lambda ic: ic[1], reverse=True)
+            k = max(sel.minCount, min(sel.maxCount, len(scored)))
+            return [i for i, _ in scored[:k]]
 
     prefer_high_hp = {
         SelectContext.SWITCH, SelectContext.TO_ACTIVE, SelectContext.TO_BENCH,
